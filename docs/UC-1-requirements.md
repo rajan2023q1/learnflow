@@ -315,5 +315,364 @@ This section defines the business requirements for the **LearnFlow Authenticatio
 
 ---
 
-*Document Owner: LearnFlow Product Team | Next Review: Sprint Planning — Auth Epic Kickoff*
+## 4. Auth Edge Cases — Enumeration & Acceptance Criteria
 
+> **Addendum v1.1 — 2026-06-13**
+> This section catalogues every meaningful edge case across the four named scenarios, assigns each a unique `EC-` identifier, and specifies Given/When/Then acceptance criteria. Each edge case also cross-references the FR it validates and notes the expected HTTP status code for fast triage during QA.
+
+---
+
+### 4.1 Duplicate Email
+
+Scope: `POST /auth/register` — the email submitted already exists in the `users` table.
+
+---
+
+**EC-001 — Exact duplicate (same casing)**
+*Validates: FR-01, FR-09 | Expected HTTP: 409*
+
+- **Given** `alice@learnflow.io` is an existing, verified account in `users`
+- **When** a new registration request is submitted with `email: "alice@learnflow.io"`
+- **Then** the API returns HTTP 409 with body `{"detail": "An account with this email already exists"}`, no new `users` row is created, and no verification email is dispatched
+
+---
+
+**EC-002 — Duplicate email, different casing**
+*Validates: FR-01 | Expected HTTP: 409*
+
+- **Given** `alice@learnflow.io` is a registered account
+- **When** a registration request is submitted with `email: "Alice@LearnFlow.IO"` (mixed case)
+- **Then** the API normalises the email to lowercase before the uniqueness check, detects the collision, and returns HTTP 409 — confirming that email comparison is case-insensitive
+
+---
+
+**EC-003 — Duplicate email with leading/trailing whitespace**
+*Validates: FR-01 | Expected HTTP: 409*
+
+- **Given** `alice@learnflow.io` is a registered account
+- **When** a registration request is submitted with `email: "  alice@learnflow.io  "` (padded whitespace)
+- **Then** the API trims the value before the uniqueness check, detects the collision, and returns HTTP 409 — no new record is created
+
+---
+
+**EC-004 — Duplicate email belonging to an unverified account**
+*Validates: FR-01, FR-02 | Expected HTTP: 409*
+
+- **Given** `bob@learnflow.io` is registered but has `email_verified = false` (verification email not yet actioned)
+- **When** a new registration request is submitted with `bob@learnflow.io`
+- **Then** the API returns HTTP 409 and the response body includes a hint: `"A pending account exists for this email. Check your inbox or request a new verification link."` — the duplicate is rejected even for unverified accounts
+
+---
+
+**EC-005 — Duplicate email, password data not leaked in error**
+*Validates: FR-09 | Expected HTTP: 409*
+
+- **Given** any duplicate email scenario (EC-001 through EC-004)
+- **When** the HTTP 409 response is rendered by the React 19 registration form
+- **Then** the password and confirm-password fields are cleared, no submitted password value appears in the response body or server logs, and the email field is focused with the inline error — confirming zero credential leakage on collision
+
+---
+
+**EC-006 — Duplicate email submitted via direct API call (no UI)**
+*Validates: FR-01 | Expected HTTP: 409*
+
+- **Given** a client calls `POST /auth/register` directly with a duplicate email (bypassing the React form)
+- **When** the FastAPI endpoint processes the request
+- **Then** HTTP 409 is returned with the same structured error payload as EC-001 — confirming the guard lives at the API layer, not only in the UI
+
+---
+
+### 4.2 Weak Password
+
+Scope: `POST /auth/register` and `POST /auth/password-reset/confirm` — the submitted password fails one or more complexity rules.
+
+Complexity rules (from FR-01 / AC-001-03): minimum 8 characters · at least one uppercase letter · at least one digit · at least one special character.
+
+---
+
+**EC-007 — Password too short**
+*Validates: FR-01, FR-10 | Expected HTTP: 422*
+
+- **Given** a visitor is submitting the registration form
+- **When** the password field contains `"Ab1!"` (4 characters — all rule types present but too short)
+- **Then** the API returns HTTP 422 with `{"field": "password", "error": "Password must be at least 8 characters"}` and no `users` record is created
+
+---
+
+**EC-008 — Password missing uppercase letter**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits registration with `password: "abcdef1!"`
+- **When** the API validates the password
+- **Then** HTTP 422 is returned with `{"field": "password", "error": "Password must contain at least one uppercase letter"}` and registration is rejected
+
+---
+
+**EC-009 — Password missing digit**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits registration with `password: "Abcdefg!"`
+- **When** the API validates the password
+- **Then** HTTP 422 is returned with `{"field": "password", "error": "Password must contain at least one digit"}` and registration is rejected
+
+---
+
+**EC-010 — Password missing special character**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits registration with `password: "Abcdef12"`
+- **When** the API validates the password
+- **Then** HTTP 422 is returned with `{"field": "password", "error": "Password must contain at least one special character"}` and registration is rejected
+
+---
+
+**EC-011 — Multiple rules failed simultaneously**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits registration with `password: "abc"` (too short, no uppercase, no digit, no special character)
+- **When** the API validates the password
+- **Then** HTTP 422 is returned with an `errors` array containing one entry per violated rule — all violations are reported in a single response, not one at a time
+
+---
+
+**EC-012 — Password and confirm-password do not match**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits `password: "Secure1!"` and `confirm_password: "Secure2!"`
+- **When** the API cross-validates the two fields
+- **Then** HTTP 422 is returned with `{"field": "confirm_password", "error": "Passwords do not match"}` and no record is created
+
+---
+
+**EC-013 — Password is entirely whitespace**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits `password: "        "` (8 space characters — satisfies length but is trivially weak)
+- **When** the API validates the password
+- **Then** the API trims the value, detects it as empty after trimming, and returns HTTP 422 with `{"field": "password", "error": "Password cannot be blank or whitespace only"}`
+
+---
+
+**EC-014 — Weak password on password reset (not just registration)**
+*Validates: FR-07 | Expected HTTP: 422*
+
+- **Given** a user follows a valid password-reset link and submits `new_password: "password"` (common, no complexity)
+- **When** `POST /auth/password-reset/confirm` validates the new password
+- **Then** HTTP 422 is returned with the relevant failed rule(s) — confirming the same complexity rules apply at reset time, not only at registration
+
+---
+
+**EC-015 — New password same as current password on reset**
+*Validates: FR-07 | Expected HTTP: 422*
+
+- **Given** a user's current `password_hash` bcrypt-matches `"OldPass1!"`
+- **When** they submit `new_password: "OldPass1!"` via a valid reset token
+- **Then** HTTP 422 is returned with `{"field": "new_password", "error": "New password must differ from your current password"}` — the reset is rejected and the token remains valid for resubmission
+
+---
+
+**EC-016 — Password field empty on submission**
+*Validates: FR-01 | Expected HTTP: 422*
+
+- **Given** a visitor submits the registration form with an empty `password` field
+- **When** the API receives the request
+- **Then** HTTP 422 is returned before any bcrypt operation — confirming null/empty input is caught at the validation layer, not the hashing layer
+
+---
+
+### 4.3 Expired Token
+
+Scope covers three token types: JWT access tokens, refresh tokens, and email verification tokens. Password-reset token expiry is covered in Section 4.4 (overlapping scenario) and cross-referenced here.
+
+---
+
+**EC-017 — Expired JWT access token on protected endpoint**
+*Validates: FR-03, FR-04 | Expected HTTP: 401*
+
+- **Given** a user holds a JWT access token whose `exp` claim is in the past by any amount
+- **When** they call any protected FastAPI endpoint with `Authorization: Bearer <expired_token>`
+- **Then** the `Depends(get_current_user)` guard raises HTTP 401 with `{"detail": "Token has expired"}` and the request is not processed
+
+---
+
+**EC-018 — Expired access token — client-side silent refresh succeeds**
+*Validates: FR-04, FR-05 (NFR via AC-005-02) | Expected HTTP: 200 (after refresh)*
+
+- **Given** the React 19 client detects the in-memory access token is expired (via `exp` claim check)
+- **When** it calls `POST /auth/refresh` with the valid `HttpOnly` refresh cookie before retrying the original request
+- **Then** a new access token is returned, the original request is retried with the new token, and the user sees no interruption or error
+
+---
+
+**EC-019 — Expired access token — no valid refresh token available**
+*Validates: FR-04 | Expected HTTP: 401*
+
+- **Given** the React 19 client detects the access token is expired and `POST /auth/refresh` returns HTTP 401 (refresh token also expired or absent)
+- **When** the client handles the 401 from the refresh call
+- **Then** the in-memory access token is cleared, the user is redirected to `/login`, and a non-alarming banner reads "Your session has expired. Please log in again."
+
+---
+
+**EC-020 — Expired refresh token presented directly to refresh endpoint**
+*Validates: FR-04 | Expected HTTP: 401*
+
+- **Given** a refresh token whose `expires_at` is in the past exists in `refresh_tokens`
+- **When** `POST /auth/refresh` receives the corresponding `HttpOnly` cookie
+- **Then** HTTP 401 is returned with `{"detail": "Session expired. Please log in again."}`, the expired row is deleted from `refresh_tokens`, and the cookie is cleared
+
+---
+
+**EC-021 — Tampered / structurally invalid JWT**
+*Validates: FR-03 | Expected HTTP: 401*
+
+- **Given** a request arrives with a JWT whose signature has been altered (e.g., last character changed)
+- **When** the RS256 verification step runs
+- **Then** HTTP 401 is returned with `{"detail": "Invalid token"}` — no claims from the tampered token are trusted or logged to application output
+
+---
+
+**EC-022 — JWT signed with an unrecognised key (algorithm confusion)**
+*Validates: FR-03 | Expected HTTP: 401*
+
+- **Given** a client presents a JWT signed with HS256 (symmetric) rather than the expected RS256 key
+- **When** the FastAPI guard evaluates the token
+- **Then** HTTP 401 is returned — confirming the guard explicitly rejects tokens signed with any algorithm other than RS256 (`algorithms=["RS256"]` is hardcoded in the verifier)
+
+---
+
+**EC-023 — Expired email verification token**
+*Validates: FR-02 | Expected HTTP: 410*
+
+- **Given** an email verification token was issued more than 24 hours ago
+- **When** the user clicks the link (or submits `GET /auth/verify-email?token=<value>`)
+- **Then** HTTP 410 is returned, the token row is deleted from `email_verification_tokens`, and the UI presents: "This verification link has expired. [Resend verification email]" — the account remains with `email_verified = false`
+
+---
+
+**EC-024 — Verification token already used (replay)**
+*Validates: FR-02 | Expected HTTP: 410*
+
+- **Given** a verification token that was already consumed (row deleted from `email_verification_tokens`)
+- **When** the same link is clicked a second time
+- **Then** the token lookup returns no row, HTTP 410 is returned with the same "link expired" message as EC-023 — a reused token is indistinguishable from an expired one, preventing state disclosure
+
+---
+
+**EC-025 — Expired password-reset token (cross-reference)**
+*Validates: FR-07 | Expected HTTP: 410 — See also AC-011-01*
+
+- **Given** a password-reset token older than 1 hour is submitted to `POST /auth/password-reset/confirm`
+- **When** the API evaluates the token's `expires_at`
+- **Then** HTTP 410 is returned, the token is deleted, and the UI displays: "This reset link has expired. [Request a new one]" — no change is made to `users.password_hash`
+
+---
+
+**EC-026 — Reset token used after password was already reset with it**
+*Validates: FR-07 | Expected HTTP: 410*
+
+- **Given** a password-reset token was already consumed (`used_at` is set and row deleted)
+- **When** the same token URL is submitted again
+- **Then** HTTP 410 is returned with the same expired-link message — a replayed reset token is treated identically to an expired one
+
+---
+
+### 4.4 Password Reset for a Non-Existent Account
+
+Scope: `POST /auth/password-reset/request` — the submitted email does not match any row in `users`.
+
+---
+
+**EC-027 — Reset requested for unregistered email (primary anti-enumeration case)**
+*Validates: FR-07, FR-09 | Expected HTTP: 200*
+
+- **Given** `unknown@example.com` does not exist in the `users` table
+- **When** `POST /auth/password-reset/request` is called with `{"email": "unknown@example.com"}`
+- **Then** the API returns HTTP 200 with the identical response body used for a valid email: `{"message": "If an account exists for this email, a reset link has been sent"}` — no reset token is created, no email is sent, and the response is indistinguishable from the success case, preventing account enumeration
+
+---
+
+**EC-028 — Response timing is normalised for non-existent vs. existing email**
+*Validates: FR-09 | Expected HTTP: 200*
+
+- **Given** reset is requested for both a registered email and an unregistered email in separate calls
+- **When** response times for both are measured across 100 samples
+- **Then** the p95 response times differ by no more than 50 ms — confirming the API performs the same work (or an equivalent delay) regardless of email existence, preventing timing-based enumeration
+
+---
+
+**EC-029 — Reset requested for non-existent email, no DB side-effects**
+*Validates: FR-07 | Expected HTTP: 200*
+
+- **Given** `ghost@example.com` does not exist in `users`
+- **When** the reset request is processed
+- **Then** zero rows are inserted into `password_reset_tokens`, zero emails are dispatched, and the transactional email provider's send log shows no record for `ghost@example.com`
+
+---
+
+**EC-030 — Reset requested for soft-deleted / deactivated account**
+*Validates: FR-07, FR-09 | Expected HTTP: 200*
+
+- **Given** a `users` row exists for `deactivated@learnflow.io` with `status = 'deactivated'`
+- **When** a reset is requested for that email
+- **Then** the API treats the account as non-existent for reset purposes, returns HTTP 200 with the standard message, creates no token, and sends no email — a deactivated account cannot be reactivated via the password-reset flow
+
+---
+
+**EC-031 — Reset requested for email with SQL/script injection characters**
+*Validates: FR-07, FR-09 | Expected HTTP: 422 or 200*
+
+- **Given** a caller submits `email: "'; DROP TABLE users;--"` or similar malformed input
+- **When** the FastAPI Pydantic model validates the field
+- **Then** HTTP 422 is returned immediately with `{"field": "email", "error": "Invalid email format"}` — the value never reaches the database layer; ORM parameterisation provides a second line of defence even if validation were bypassed
+
+---
+
+**EC-032 — Multiple reset requests for the same non-existent email in rapid succession**
+*Validates: FR-07, FR-09 | Expected HTTP: 200 (rate-limited after threshold)*
+
+- **Given** `ghost@example.com` does not exist in `users`
+- **When** 10 reset requests are submitted for that address within 60 seconds
+- **Then** the first 5 return HTTP 200 (standard response), requests 6–10 return HTTP 429 `{"detail": "Too many requests. Please wait before trying again."}` — confirming that the rate limiter fires on the endpoint regardless of whether the account exists, and the limit itself does not confirm or deny account existence
+
+---
+
+### 4.5 Edge Case Coverage Matrix
+
+| EC ID | Scenario | HTTP | FR Validated | Test Type |
+|-------|----------|------|--------------|-----------|
+| EC-001 | Exact duplicate email | 409 | FR-01, FR-09 | Integration |
+| EC-002 | Duplicate — case-insensitive | 409 | FR-01 | Integration |
+| EC-003 | Duplicate — trimmed whitespace | 409 | FR-01 | Integration |
+| EC-004 | Duplicate — unverified account | 409 | FR-01, FR-02 | Integration |
+| EC-005 | No credential leak on 409 | 409 | FR-09 | Security / E2E |
+| EC-006 | Duplicate via direct API | 409 | FR-01 | Integration |
+| EC-007 | Password too short | 422 | FR-01 | Unit |
+| EC-008 | No uppercase | 422 | FR-01 | Unit |
+| EC-009 | No digit | 422 | FR-01 | Unit |
+| EC-010 | No special character | 422 | FR-01 | Unit |
+| EC-011 | Multiple rules failed | 422 | FR-01 | Unit |
+| EC-012 | Password / confirm mismatch | 422 | FR-01 | Unit |
+| EC-013 | Whitespace-only password | 422 | FR-01 | Unit |
+| EC-014 | Weak password on reset | 422 | FR-07 | Integration |
+| EC-015 | New password same as current | 422 | FR-07 | Integration |
+| EC-016 | Empty password field | 422 | FR-01 | Unit |
+| EC-017 | Expired JWT on protected route | 401 | FR-03, FR-04 | Integration |
+| EC-018 | Expired token — silent refresh succeeds | 200 | FR-04, FR-05 | E2E |
+| EC-019 | Expired token — refresh also expired | 401 | FR-04 | E2E |
+| EC-020 | Expired refresh token on refresh endpoint | 401 | FR-04 | Integration |
+| EC-021 | Tampered JWT | 401 | FR-03 | Security |
+| EC-022 | Algorithm confusion (HS256 → RS256) | 401 | FR-03 | Security |
+| EC-023 | Expired email verification token | 410 | FR-02 | Integration |
+| EC-024 | Verification token replay | 410 | FR-02 | Integration |
+| EC-025 | Expired password-reset token | 410 | FR-07 | Integration |
+| EC-026 | Reset token replay after use | 410 | FR-07 | Integration |
+| EC-027 | Reset for unregistered email | 200 | FR-07, FR-09 | Integration |
+| EC-028 | Timing normalisation — non-existent email | 200 | FR-09 | Security / Perf |
+| EC-029 | No DB side-effects for non-existent email | 200 | FR-07 | Integration |
+| EC-030 | Reset for deactivated account | 200 | FR-07, FR-09 | Integration |
+| EC-031 | Injection characters in email | 422 | FR-07, FR-09 | Security |
+| EC-032 | Rate limit on reset — non-existent email | 429 | FR-07, FR-09 | Integration |
+
+---
+
+*Addendum Owner: LearnFlow BA Team | Linked Epic: AUTH-001 | Status: Ready for Dev Review*
