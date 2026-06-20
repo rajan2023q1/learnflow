@@ -1,0 +1,59 @@
+/* ============================================================
+   LearnFlow — Spacing, Radius, Shadows, Borders, Motion
+   Base unit: 4px
+   ============================================================ */
+
+:root {
+  /* ---- Spacing scale (4px base) ---- */
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+  --space-20:  80px;
+  --space-24:  96px;
+
+  /* ---- Radius (8px is the brand default) ---- */
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   8px;   /* default — buttons, inputs, badges */
+  --radius-lg:   12px;  /* cards */
+  --radius-xl:   16px;  /* large panels, modals */
+  --radius-2xl:  24px;
+  --radius-full: 9999px;
+
+  /* ---- Borders ---- */
+  --border-width:      1px;
+  --border-width-thick:1.5px;
+
+  /* ---- Shadows — soft, calm elevation ---- */
+  --shadow-xs:  0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-sm:  0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md:  0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+  --shadow-lg:  0 12px 28px rgba(15, 23, 42, 0.10), 0 4px 8px rgba(15, 23, 42, 0.05);
+  --shadow-xl:  0 24px 56px rgba(15, 23, 42, 0.16), 0 8px 16px rgba(15, 23, 42, 0.06);
+
+  /* Branded focus ring + colored elevation for primary CTAs */
+  --shadow-focus:  0 0 0 4px var(--brand-ring);
+  --shadow-brand:  0 8px 24px rgba(79, 70, 229, 0.28);
+
+  /* ---- Motion — calm, no bounce ---- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   320ms;
+
+  /* ---- Layout ---- */
+  --container-sm:  480px;
+  --container-md:  768px;
+  --container-lg:  1024px;
+  --container-xl:  1280px;
+  --auth-card-w:   440px;
+}

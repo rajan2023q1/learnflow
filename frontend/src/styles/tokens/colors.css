@@ -1,0 +1,140 @@
+/* ============================================================
+   LearnFlow — Color Tokens
+   Primary: Indigo  ·  Accent: Teal  ·  Neutrals: Slate
+   ============================================================ */
+
+:root {
+  /* ---- Brand: Indigo (primary) ---- */
+  --indigo-50:  #eef2ff;
+  --indigo-100: #e0e7ff;
+  --indigo-200: #c7d2fe;
+  --indigo-300: #a5b4fc;
+  --indigo-400: #818cf8;
+  --indigo-500: #6366f1;
+  --indigo-600: #4f46e5;  /* core brand */
+  --indigo-700: #4338ca;
+  --indigo-800: #3730a3;
+  --indigo-900: #312e81;
+  --indigo-950: #1e1b4b;
+
+  /* ---- Accent: Teal ---- */
+  --teal-50:  #f0fdfa;
+  --teal-100: #ccfbf1;
+  --teal-200: #99f6e4;
+  --teal-300: #5eead4;
+  --teal-400: #2dd4bf;
+  --teal-500: #14b8a6;  /* core accent */
+  --teal-600: #0d9488;
+  --teal-700: #0f766e;
+  --teal-800: #115e59;
+  --teal-900: #134e4a;
+
+  /* ---- Neutrals: Slate ---- */
+  --slate-50:  #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --slate-950: #020617;
+
+  /* ---- Semantic palettes ---- */
+  --success-50:  #ecfdf5;
+  --success-100: #d1fae5;
+  --success-500: #10b981;
+  --success-600: #059669;
+  --success-700: #047857;
+
+  --warning-50:  #fffbeb;
+  --warning-100: #fef3c7;
+  --warning-500: #f59e0b;
+  --warning-600: #d97706;
+  --warning-700: #b45309;
+
+  --danger-50:  #fef2f2;
+  --danger-100: #fee2e2;
+  --danger-500: #ef4444;
+  --danger-600: #dc2626;
+  --danger-700: #b91c1c;
+
+  --info-50:  #eff6ff;
+  --info-100: #dbeafe;
+  --info-500: #3b82f6;
+  --info-600: #2563eb;
+  --info-700: #1d4ed8;
+
+  /* ============================================================
+     Semantic aliases — reference these in components
+     ============================================================ */
+
+  /* Brand */
+  --brand:            var(--indigo-600);
+  --brand-hover:      var(--indigo-700);
+  --brand-active:     var(--indigo-800);
+  --brand-subtle:     var(--indigo-50);
+  --brand-subtle-2:   var(--indigo-100);
+  --brand-border:     var(--indigo-200);
+  --brand-ring:       rgba(79, 70, 229, 0.35);
+  --on-brand:         #ffffff;
+
+  --accent:           var(--teal-500);
+  --accent-hover:     var(--teal-600);
+  --accent-subtle:    var(--teal-50);
+  --accent-border:    var(--teal-200);
+  --on-accent:        #ffffff;
+
+  /* Surfaces */
+  --surface-page:     var(--slate-50);
+  --surface-card:     #ffffff;
+  --surface-raised:   #ffffff;
+  --surface-sunken:   var(--slate-100);
+  --surface-inverse:  var(--slate-900);
+  --surface-overlay:  rgba(15, 23, 42, 0.55);
+
+  /* Text */
+  --text-strong:      var(--slate-900);
+  --text-body:        var(--slate-700);
+  --text-muted:       var(--slate-500);
+  --text-subtle:      var(--slate-400);
+  --text-on-inverse:  var(--slate-50);
+  --text-link:        var(--indigo-600);
+  --text-link-hover:  var(--indigo-700);
+
+  /* Borders & dividers */
+  --border:           var(--slate-200);
+  --border-strong:    var(--slate-300);
+  --border-focus:     var(--indigo-600);
+  --divider:          var(--slate-200);
+
+  /* Field / input */
+  --field-bg:         #ffffff;
+  --field-border:     var(--slate-300);
+  --field-placeholder:var(--slate-400);
+  --field-disabled:   var(--slate-100);
+
+  /* Semantic text/bg/border */
+  --success:          var(--success-600);
+  --success-bg:       var(--success-50);
+  --success-border:   var(--success-100);
+
+  --warning:          var(--warning-600);
+  --warning-bg:       var(--warning-50);
+  --warning-border:   var(--warning-100);
+
+  --danger:           var(--danger-600);
+  --danger-bg:        var(--danger-50);
+  --danger-border:    var(--danger-100);
+
+  --info:             var(--info-600);
+  --info-bg:          var(--info-50);
+  --info-border:      var(--info-100);
+
+  /* Decorative auth gradient — calm indigo→teal wash */
+  --gradient-brand:   linear-gradient(135deg, var(--indigo-600) 0%, var(--indigo-500) 45%, var(--teal-500) 100%);
+  --gradient-aurora:  radial-gradient(1200px 600px at 15% -10%, var(--indigo-100) 0%, transparent 55%),
+                      radial-gradient(900px 500px at 110% 10%, var(--teal-100) 0%, transparent 50%);
+}
