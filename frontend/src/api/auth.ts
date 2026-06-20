@@ -18,6 +18,38 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+// --- Silent refresh scheduling (AC-005-02) ---------------------------------
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let onRefreshFailure: (() => void) | null = null;
+
+/** Register a callback invoked when a silent refresh fails (session ended). */
+export function setOnRefreshFailure(cb: (() => void) | null): void {
+  onRefreshFailure = cb;
+}
+
+/** Schedule a silent token refresh ~1 min before the access token expires. */
+export function scheduleRefresh(expiresInSeconds: number): void {
+  stopRefresh();
+  const delayMs = Math.max(expiresInSeconds - 60, 5) * 1000;
+  refreshTimer = setTimeout(async () => {
+    try {
+      const result = await authApi.refresh();
+      setAccessToken(result.access_token);
+      scheduleRefresh(result.expires_in);
+    } catch {
+      setAccessToken(null);
+      onRefreshFailure?.();
+    }
+  }, delayMs);
+}
+
+export function stopRefresh(): void {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   fieldErrors: Record<string, string>;
@@ -111,8 +143,8 @@ export const authApi = {
   resendVerification: (email: string) =>
     request<MessageResult>('/auth/verify-email/resend', { email }),
 
-  login: (email: string, password: string) =>
-    request<LoginResult>('/auth/login', { email, password }),
+  login: (email: string, password: string, remember = true) =>
+    request<LoginResult>('/auth/login', { email, password, remember }),
 
   refresh: () => request<LoginResult>('/auth/refresh', {}),
 

@@ -175,3 +175,31 @@ async def test_password_reset_invalid_token_400(client):
         json={"token": "bad", "password": GOOD_PASSWORD, "confirm_password": GOOD_PASSWORD},
     )
     assert resp.status_code == 400
+
+
+# --- Review-fix regressions -------------------------------------------------
+async def test_remember_me_false_sets_session_cookie(client, outbox):
+    email, password = await register_and_verify(client, outbox)
+    resp = await client.post(
+        "/auth/login", json={"email": email, "password": password, "remember": False}
+    )
+    assert resp.status_code == 200
+    set_cookie = " ".join(resp.headers.get_list("set-cookie")).lower()
+    assert "lf_refresh=" in set_cookie
+    assert "max-age" not in set_cookie  # session cookie — cleared on browser close
+
+
+async def test_remember_me_true_sets_persistent_cookie(client, outbox):
+    email, password = await register_and_verify(client, outbox)
+    resp = await client.post("/auth/login", json={"email": email, "password": password})
+    set_cookie = " ".join(resp.headers.get_list("set-cookie")).lower()
+    assert "max-age" in set_cookie  # persistent cookie
+
+
+async def test_email_endpoint_is_throttled(client):
+    # email_throttle_max defaults to 5 → the 6th request from one IP is rejected.
+    for _ in range(5):
+        r = await client.post("/auth/password-reset/request", json={"email": "x@example.com"})
+        assert r.status_code == 200
+    r = await client.post("/auth/password-reset/request", json={"email": "x@example.com"})
+    assert r.status_code == 429

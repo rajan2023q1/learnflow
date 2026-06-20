@@ -37,6 +37,8 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    # When false, the refresh cookie is session-scoped (cleared on browser close).
+    remember: bool = True
 
 
 class VerifyEmailRequest(BaseModel):

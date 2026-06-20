@@ -50,11 +50,19 @@ src/
     global.css
 ```
 
-## Not yet wired
+## Email-link landings & session
 
-Email verification and password reset are completed from links in the email
-(console output in the dev backend). The corresponding landing pages
-(`/verify-email?token=…`, `/reset-password?token=…`) aren't built — the prototype
-has no router — but `authApi.verifyEmail` / `authApi.confirmPasswordReset` are
-ready in `api/auth.ts` for when they are. Silent token refresh (AC-005-02) can be
-layered on with `authApi.refresh()`.
+On load the app inspects the URL for email-link tokens (no router dependency):
+
+- **`/verify-email?token=…`** → shows a "Verifying…" state, calls `verifyEmail`,
+  then routes to login with a success/error banner.
+- **`/reset-password?token=…`** → opens the "Set a new password" screen and calls
+  `confirmPasswordReset` (handles 410 expired → back to forgot).
+
+The token is stripped from the address bar afterwards (`history.replaceState`).
+After login, `scheduleRefresh` performs a silent `/auth/refresh` ~1 min before the
+access token expires (AC-005-02); on failure the user is returned to login.
+
+In the dev backend, email is console output, so copy the `token=…` value from the
+backend log into `http://localhost:5173/reset-password?token=…` to exercise the
+reset-confirm screen.

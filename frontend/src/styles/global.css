@@ -31,6 +31,16 @@ body {
   }
 }
 
+/* Auth split-screen collapses to a single column on small screens */
+@media (max-width: 860px) {
+  .lf-auth-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .lf-auth-brand {
+    display: none !important;
+  }
+}
+
 /* Calm, no bounce — honour reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {
   *,

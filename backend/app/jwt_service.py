@@ -81,6 +81,7 @@ def create_access_token(*, user_id: uuid.UUID, email: str, roles: list[str]) -> 
         "email": email,
         "roles": roles,
         "iss": settings.jwt_issuer,
+        "aud": settings.jwt_audience,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=expires_in)).timestamp()),
     }
@@ -96,5 +97,6 @@ def decode_access_token(token: str) -> dict:
         public_key,
         algorithms=[settings.jwt_algorithm],
         issuer=settings.jwt_issuer,
+        audience=settings.jwt_audience,
         options={"require": ["exp", "iat", "sub"]},
     )

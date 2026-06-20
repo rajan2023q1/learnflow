@@ -32,6 +32,19 @@ generate them explicitly and store the private key in a secrets manager:
 python -m scripts.generate_keys           # writes keys/jwt_{private,public}.pem
 ```
 
+## Database migrations (Alembic)
+
+Tables auto-create on startup in dev (`DB_AUTO_CREATE=true`). For managed
+environments, set `DB_AUTO_CREATE=false` and drive the schema with Alembic:
+
+```bash
+alembic upgrade head                       # apply migrations
+alembic revision --autogenerate -m "..."   # after changing models
+```
+
+The migration env reads `DATABASE_URL` and converts the async driver to its
+sync equivalent automatically (`migrations/env.py`).
+
 ## Tests
 
 ```bash

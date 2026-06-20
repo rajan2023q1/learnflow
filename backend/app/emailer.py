@@ -85,4 +85,7 @@ class Emailer:
         )
 
 
+# Module-level dev/test backend. NOTE: the in-memory `outbox` is per-process, so
+# it is only meaningful with a single worker (tests, local dev). In production,
+# replace `_deliver` with a real provider (SES/SendGrid) — outbox is not used.
 emailer = Emailer()

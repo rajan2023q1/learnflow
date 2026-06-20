@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ApiError, authApi, setAccessToken } from '../api/auth';
+import { useEffect, useState } from 'react';
+import { ApiError, authApi, scheduleRefresh, setAccessToken, setOnRefreshFailure } from '../api/auth';
 import { Alert } from '../ds/Alert';
 import type { AlertTone } from '../ds/Alert';
 import { Button } from '../ds/Button';
@@ -9,11 +9,12 @@ import { Logo } from '../ds/Logo';
 import { PasswordInput, scorePassword } from '../ds/PasswordInput';
 import { ArrowLeftIcon, LockIcon, MailIcon, MailOpenIcon, SendIcon } from '../ds/icons';
 
-type Screen = 'login' | 'register' | 'forgot' | 'verify' | 'sent';
+type Screen = 'login' | 'register' | 'forgot' | 'verify' | 'sent' | 'reset-confirm' | 'verifying';
 
 type AlertState = { tone: AlertTone; title: string; msg: string } | null;
 
-const validEmail = (x: string) => /\S+@\S+\.\S+/.test((x || '').trim());
+// Reject obvious non-addresses (e.g. "@@.") — the backend's EmailStr is authoritative.
+const validEmail = (x: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((x || '').trim());
 
 const linkStyle: React.CSSProperties = {
   color: 'var(--brand)',
@@ -42,9 +43,11 @@ export function AuthPrototype() {
   const [pwErr, setPwErr] = useState('');
   const [confirmErr, setConfirmErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [remember, setRemember] = useState(true);
   const [alert, setAlert] = useState<AlertState>(null);
   const [sentTo, setSentTo] = useState('');
+  const [resetToken, setResetToken] = useState('');
 
   const nav = (next: Screen) => {
     setScreen(next);
@@ -70,6 +73,42 @@ export function AuthPrototype() {
     nav('forgot');
   };
 
+  // On load, handle email links: /verify-email?token=… and /reset-password?token=…
+  useEffect(() => {
+    setOnRefreshFailure(() => {
+      setAccessToken(null);
+      nav('login');
+      setAlert({ tone: 'info', title: '', msg: 'Your session expired. Please log in again.' });
+    });
+
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get('token');
+    const path = url.pathname;
+    const clearUrl = () =>
+      window.history.replaceState({}, '', url.pathname.replace(/\/(verify-email|reset-password)$/, '/'));
+
+    if (token && path.endsWith('/reset-password')) {
+      setResetToken(token);
+      setScreen('reset-confirm');
+      clearUrl();
+    } else if (token && path.endsWith('/verify-email')) {
+      setScreen('verifying');
+      authApi
+        .verifyEmail(token)
+        .then(() => {
+          setScreen('login');
+          setAlert({ tone: 'success', title: '', msg: 'Email verified — you can log in now.' });
+        })
+        .catch((err) => {
+          setScreen('login');
+          setAlert({ tone: 'danger', title: '', msg: (err as ApiError).message });
+        })
+        .finally(clearUrl);
+    }
+    return () => setOnRefreshFailure(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     let ee = '';
@@ -86,8 +125,9 @@ export function AuthPrototype() {
     setLoading(true);
     setAlert(null);
     try {
-      const result = await authApi.login(email.trim(), pw);
+      const result = await authApi.login(email.trim(), pw, remember);
       setAccessToken(result.access_token); // in-memory only
+      scheduleRefresh(result.expires_in); // silent refresh before expiry (AC-005-02)
       setLoading(false);
       setAlert({ tone: 'success', title: 'Welcome back', msg: "You're signed in — taking you to your dashboard…" });
     } catch (err) {
@@ -179,16 +219,61 @@ export function AuthPrototype() {
   };
 
   const onResend = async () => {
+    setResending(true);
     try {
       const result = await authApi.resendVerification(sentTo || email.trim());
       setAlert({ tone: 'info', title: '', msg: result.message });
     } catch (err) {
       setAlert({ tone: 'danger', title: '', msg: (err as ApiError).message });
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const onResetConfirmSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let pe = '';
+    let ce = '';
+    if (scorePassword(pw) < 4) pe = 'Use 8+ characters with an uppercase letter, a number, and a symbol.';
+    if (!confirm || confirm !== pw) ce = 'Passwords don’t match.';
+    if (pe || ce) {
+      setPwErr(pe);
+      setConfirmErr(ce);
+      return;
+    }
+    setPwErr('');
+    setConfirmErr('');
+    setLoading(true);
+    setAlert(null);
+    try {
+      await authApi.confirmPasswordReset(resetToken, pw, confirm);
+      setLoading(false);
+      setPw('');
+      setConfirm('');
+      setScreen('login');
+      setAlert({ tone: 'success', title: '', msg: 'Password updated. Please log in.' });
+    } catch (err) {
+      setLoading(false);
+      const e2 = err as ApiError;
+      if (e2.status === 410) {
+        // Expired link (AC-011-01) — push them back to request a new one.
+        setScreen('forgot');
+        setAlert({ tone: 'warning', title: '', msg: 'This link has expired — request a new one.' });
+      } else if (e2.status === 400) {
+        setScreen('forgot');
+        setAlert({ tone: 'danger', title: '', msg: e2.message });
+      } else if (e2.status === 422) {
+        setPwErr(e2.fieldErrors.password ?? '');
+        setConfirmErr(e2.fieldErrors.confirm_password ?? '');
+      } else {
+        setAlert({ tone: 'danger', title: '', msg: e2.message });
+      }
     }
   };
 
   return (
     <div
+      className="lf-auth-grid"
       style={{
         minHeight: '100vh',
         display: 'grid',
@@ -199,6 +284,7 @@ export function AuthPrototype() {
     >
       {/* ===================== BRAND PANEL ===================== */}
       <aside
+        className="lf-auth-brand"
         style={{
           position: 'relative',
           overflow: 'hidden',
@@ -458,7 +544,7 @@ export function AuthPrototype() {
                 your account, then log in.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <Button block size="lg" variant="secondary" onClick={onResend}>
+                <Button block size="lg" variant="secondary" onClick={onResend} loading={resending}>
                   Resend verification email
                 </Button>
                 <a href="#" onClick={goLogin} style={{ ...linkStyle, fontSize: 14, padding: 8 }}>
@@ -490,11 +576,70 @@ export function AuthPrototype() {
               </h2>
               <p style={{ fontSize: 16, color: '#64748b', margin: '0 0 28px', lineHeight: 1.6 }}>
                 If an account exists for <strong style={{ color: '#0f172a' }}>{sentTo}</strong>, a password reset link is on
-                its way. The link expires in 30 minutes.
+                its way. The link expires in 1 hour.
               </p>
               <Button block size="lg" onClick={goLogin}>
                 Back to log in
               </Button>
+            </div>
+          )}
+
+          {/* ============ RESET PASSWORD (from email link) ============ */}
+          {screen === 'reset-confirm' && (
+            <form onSubmit={onResetConfirmSubmit}>
+              <h2 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.01em', color: '#0f172a', margin: '0 0 8px' }}>
+                Set a new password
+              </h2>
+              <p style={{ fontSize: 16, color: '#64748b', margin: '0 0 28px' }}>
+                Choose a strong password you don't use elsewhere.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <PasswordInput
+                  label="New password"
+                  iconLeft={<LockIcon />}
+                  value={pw}
+                  onChange={(e) => {
+                    setPw(e.target.value);
+                    setPwErr('');
+                  }}
+                  error={pwErr}
+                  showStrength
+                  required
+                />
+                <PasswordInput
+                  label="Confirm new password"
+                  iconLeft={<LockIcon />}
+                  value={confirm}
+                  onChange={(e) => {
+                    setConfirm(e.target.value);
+                    setConfirmErr('');
+                  }}
+                  error={confirmErr}
+                  required
+                />
+                <Button block size="lg" type="submit" loading={loading}>
+                  Reset password
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {/* ============ VERIFYING (email-link landing) ============ */}
+          {screen === 'verifying' && (
+            <div style={{ textAlign: 'center', color: '#64748b' }}>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  margin: '0 auto 20px',
+                  borderRadius: '50%',
+                  border: '3px solid var(--slate-200)',
+                  borderTopColor: 'var(--brand)',
+                  animation: 'lf-spin 0.7s linear infinite',
+                }}
+              />
+              <p style={{ fontSize: 16, margin: 0 }}>Verifying your email…</p>
             </div>
           )}
         </div>

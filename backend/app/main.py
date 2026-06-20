@@ -17,8 +17,11 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Dev convenience: ensure tables exist. Production uses Alembic migrations.
-    await create_all()
+    # Dev convenience only: auto-create tables when DB_AUTO_CREATE is on (default).
+    # Managed environments should set DB_AUTO_CREATE=false and run
+    # `alembic upgrade head` instead (see migrations/).
+    if settings.db_auto_create:
+        await create_all()
     yield
 
 
@@ -33,8 +36,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,  # required for the HttpOnly refresh cookie
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth.router)

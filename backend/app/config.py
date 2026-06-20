@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # Zero-config default is SQLite; point at Postgres 17 for production, e.g.
     #   postgresql+asyncpg://user:pass@localhost:5432/learnflow
     database_url: str = "sqlite+aiosqlite:///./learnflow.db"
+    # Auto-create tables on startup (dev convenience). Disable in managed envs
+    # and use `alembic upgrade head` (migrations/) for schema changes.
+    db_auto_create: bool = True
 
     # --- Token lifetimes (FR-04, AC-003/009/011) ----------------------------
     access_token_ttl_minutes: int = 15
@@ -24,9 +27,24 @@ class Settings(BaseSettings):
     password_reset_ttl_hours: int = 1
 
     # --- Account lockout (FR-06, AC-004-04) ---------------------------------
+    # Primary AC-004-04 trigger: failures from the SAME ip for the same account.
     max_failed_logins: int = 5
+    # Secondary trigger across ALL ips for one account, to blunt IP-rotating
+    # brute force; set higher so it doesn't let an attacker trivially lock a victim.
+    max_failed_logins_per_email: int = 20
     failed_login_window_minutes: int = 10
     lockout_minutes: int = 15
+    # Failed-login ledger rows older than this are pruned opportunistically.
+    login_attempt_retention_hours: int = 24
+
+    # --- Email-sending throttle (anti-abuse for resend / reset request) -----
+    email_throttle_max: int = 5
+    email_throttle_window_minutes: int = 60
+
+    # --- Reverse proxy ------------------------------------------------------
+    # When true, trust the first hop of X-Forwarded-For for the client IP.
+    # Only enable behind a proxy that sets the header (it is spoofable otherwise).
+    trust_proxy: bool = False
 
     # --- Password hashing (FR-10) -------------------------------------------
     bcrypt_rounds: int = 12
@@ -34,6 +52,7 @@ class Settings(BaseSettings):
     # --- JWT (NFR-04, AC-007) -----------------------------------------------
     jwt_algorithm: str = "RS256"
     jwt_issuer: str = "learnflow"
+    jwt_audience: str = "learnflow-api"
     jwt_private_key_path: str = "keys/jwt_private.pem"
     jwt_public_key_path: str = "keys/jwt_public.pem"
     # Optional inline PEM (takes precedence over the *_path files when set).
@@ -43,7 +62,9 @@ class Settings(BaseSettings):
     # --- Refresh-token cookie (NFR-05) --------------------------------------
     refresh_cookie_name: str = "lf_refresh"
     cookie_secure: bool = True
-    cookie_samesite: str = "strict"
+    # 'lax' (not 'strict') so the refresh cookie still rides top-level navigations
+    # from email-link landings, while blocking cross-site POST (the CSRF threat).
+    cookie_samesite: str = "lax"
     cookie_domain: str | None = None
     cookie_path: str = "/auth"
 
