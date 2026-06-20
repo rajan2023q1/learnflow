@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
+import { ApiError, authApi, setAccessToken } from '../api/auth';
 import { Alert } from '../ds/Alert';
 import type { AlertTone } from '../ds/Alert';
 import { Button } from '../ds/Button';
@@ -23,16 +24,14 @@ const linkStyle: React.CSSProperties = {
 /**
  * LearnFlow authentication flow — the implemented Auth Prototype.
  *
- * Self-contained client-side click-through across five screens (login,
- * register, email verification, forgot password, reset-link-sent) wired
- * to mock submit handlers that mirror the API response classes described
- * in docs/UC-1-requirements.md. Swap the setTimeout handlers for real
- * `fetch` calls to the FastAPI auth endpoints to go live.
- *
- * Demo shortcuts on the login form:
- *   • any email + any password           → success
- *   • password `wrong`                    → HTTP 401 "Invalid email or password."
- *   • email starting `locked@`            → HTTP 429 account lockout
+ * Five screens (login, register, email verification, forgot password,
+ * reset-link-sent) wired to the FastAPI auth API via ../api/auth. The access
+ * token is kept in memory; the refresh token rides in an HttpOnly cookie.
+ * HTTP responses map to the UI as specified in docs/UC-1-requirements.md:
+ *   • 401 → "Invalid email or password."        (AC-004-02)
+ *   • 403 → unverified → jump to the verify screen (AC-004-03)
+ *   • 429 → account lockout warning              (AC-004-04)
+ *   • 409 → inline email error on register       (AC-002)
  */
 export function AuthPrototype() {
   const [screen, setScreen] = useState<Screen>('login');
@@ -47,10 +46,7 @@ export function AuthPrototype() {
   const [alert, setAlert] = useState<AlertState>(null);
   const [sentTo, setSentTo] = useState('');
 
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const nav = (next: Screen) => {
-    if (timer.current) clearTimeout(timer.current);
     setScreen(next);
     setPw('');
     setConfirm('');
@@ -74,7 +70,7 @@ export function AuthPrototype() {
     nav('forgot');
   };
 
-  const onLoginSubmit = (e: React.FormEvent) => {
+  const onLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     let ee = '';
     let pe = '';
@@ -89,26 +85,30 @@ export function AuthPrototype() {
     setPwErr('');
     setLoading(true);
     setAlert(null);
-    timer.current = setTimeout(() => {
-      const id = email.trim().toLowerCase();
-      if (id.indexOf('locked@') === 0) {
-        setLoading(false);
-        setAlert({
-          tone: 'warning',
-          title: 'Account temporarily locked',
-          msg: 'Too many failed attempts. Try again in 15 minutes.',
-        });
-      } else if (pw === 'wrong') {
-        setLoading(false);
+    try {
+      const result = await authApi.login(email.trim(), pw);
+      setAccessToken(result.access_token); // in-memory only
+      setLoading(false);
+      setAlert({ tone: 'success', title: 'Welcome back', msg: "You're signed in — taking you to your dashboard…" });
+    } catch (err) {
+      setLoading(false);
+      const e2 = err as ApiError;
+      if (e2.status === 401) {
         setAlert({ tone: 'danger', title: '', msg: 'Invalid email or password.' });
+      } else if (e2.status === 403) {
+        // Unverified email — send them to the verification screen to resend.
+        setSentTo(email.trim());
+        setScreen('verify');
+        setAlert({ tone: 'warning', title: 'Verify your email', msg: e2.message });
+      } else if (e2.status === 429) {
+        setAlert({ tone: 'warning', title: 'Account temporarily locked', msg: e2.message });
       } else {
-        setLoading(false);
-        setAlert({ tone: 'success', title: 'Welcome back', msg: 'Logging you in — taking you to your dashboard…' });
+        setAlert({ tone: 'danger', title: '', msg: e2.message });
       }
-    }, 700);
+    }
   };
 
-  const onRegisterSubmit = (e: React.FormEvent) => {
+  const onRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     let ee = '';
     let pe = '';
@@ -126,16 +126,33 @@ export function AuthPrototype() {
     setPwErr('');
     setConfirmErr('');
     setLoading(true);
-    timer.current = setTimeout(() => {
+    setAlert(null);
+    try {
+      await authApi.register(email.trim(), pw, confirm);
       setLoading(false);
       setSentTo(email.trim());
       setScreen('verify');
       setPw('');
       setConfirm('');
-    }, 800);
+    } catch (err) {
+      setLoading(false);
+      const e2 = err as ApiError;
+      if (e2.status === 409) {
+        setEmailErr(e2.message); // AC-002-02 — inline on the email field
+      } else if (e2.status === 422) {
+        setEmailErr(e2.fieldErrors.email ?? '');
+        setPwErr(e2.fieldErrors.password ?? '');
+        setConfirmErr(e2.fieldErrors.confirm_password ?? '');
+        if (!e2.fieldErrors.email && !e2.fieldErrors.password && !e2.fieldErrors.confirm_password) {
+          setAlert({ tone: 'danger', title: '', msg: e2.message });
+        }
+      } else {
+        setAlert({ tone: 'danger', title: '', msg: e2.message });
+      }
+    }
   };
 
-  const onForgotSubmit = (e: React.FormEvent) => {
+  const onForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validEmail(email)) {
       setEmailErr('Enter a valid email address.');
@@ -143,14 +160,26 @@ export function AuthPrototype() {
     }
     setEmailErr('');
     setLoading(true);
-    timer.current = setTimeout(() => {
+    setAlert(null);
+    try {
+      await authApi.requestPasswordReset(email.trim());
       setLoading(false);
       setSentTo(email.trim());
       setScreen('sent');
-    }, 700);
+    } catch (err) {
+      setLoading(false);
+      setAlert({ tone: 'danger', title: '', msg: (err as ApiError).message });
+    }
   };
 
-  const onResend = () => setAlert({ tone: 'info', title: '', msg: 'Verification email resent.' });
+  const onResend = async () => {
+    try {
+      const result = await authApi.resendVerification(sentTo || email.trim());
+      setAlert({ tone: 'info', title: '', msg: result.message });
+    } catch (err) {
+      setAlert({ tone: 'danger', title: '', msg: (err as ApiError).message });
+    }
+  };
 
   return (
     <div
@@ -282,13 +311,6 @@ export function AuthPrototype() {
                 </Button>
               </div>
 
-              <p style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', margin: '14px 0 0', lineHeight: 1.5 }}>
-                Demo: any email logs in · password{' '}
-                <code style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: '#64748b' }}>wrong</code>{' '}
-                triggers the error · an email starting{' '}
-                <code style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, color: '#64748b' }}>locked@</code>{' '}
-                triggers lockout
-              </p>
               <p style={{ fontSize: 14, color: '#64748b', textAlign: 'center', marginTop: 18 }}>
                 New to LearnFlow?{' '}
                 <a href="#" onClick={goRegister} style={linkStyle}>
