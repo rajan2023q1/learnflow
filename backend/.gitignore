@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Local config & data
+.env
+*.db
+*.sqlite3
+
+# JWT keys — never commit private keys
+keys/
