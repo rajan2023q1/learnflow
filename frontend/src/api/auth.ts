@@ -88,6 +88,12 @@ export interface MessageResult {
   message: string;
 }
 
+export interface RegisterResult {
+  message: string;
+  /** True when the account was auto-verified (dev, no email provider). */
+  email_verified: boolean;
+}
+
 export interface UserResult {
   id: string;
   email: string;
@@ -98,7 +104,7 @@ export interface UserResult {
 
 export const authApi = {
   register: (email: string, password: string, confirmPassword: string) =>
-    request<MessageResult>('/auth/register', { email, password, confirm_password: confirmPassword }),
+    request<RegisterResult>('/auth/register', { email, password, confirm_password: confirmPassword }),
 
   verifyEmail: (token: string) => request<MessageResult>('/auth/verify-email', { token }),
 

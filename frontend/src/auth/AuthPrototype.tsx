@@ -128,12 +128,18 @@ export function AuthPrototype() {
     setLoading(true);
     setAlert(null);
     try {
-      await authApi.register(email.trim(), pw, confirm);
+      const result = await authApi.register(email.trim(), pw, confirm);
       setLoading(false);
-      setSentTo(email.trim());
-      setScreen('verify');
       setPw('');
       setConfirm('');
+      if (result.email_verified) {
+        // Auto-verified (dev, no email provider) — go straight to login.
+        setScreen('login');
+        setAlert({ tone: 'success', title: '', msg: 'Account created — you can log in now.' });
+      } else {
+        setSentTo(email.trim());
+        setScreen('verify');
+      }
     } catch (err) {
       setLoading(false);
       const e2 = err as ApiError;

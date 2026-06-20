@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     cookie_path: str = "/auth"
 
     # --- Email / client -----------------------------------------------------
+    # Dev convenience for when no email provider is configured yet: mark new
+    # accounts as verified on registration so users can log in immediately.
+    # NEVER enable in production — it bypasses FR-02 email verification.
+    auto_verify_email: bool = False
     email_from: str = "no-reply@learnflow.example"
     frontend_url: str = "http://localhost:5173"
     cors_origins: list[str] = ["http://localhost:5173"]

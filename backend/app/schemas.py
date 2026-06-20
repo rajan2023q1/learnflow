@@ -78,6 +78,13 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class RegisterResponse(BaseModel):
+    message: str
+    # True when the account was auto-verified (dev, no email provider) so the
+    # client can route straight to login instead of the "check your inbox" screen.
+    email_verified: bool
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -29,6 +29,7 @@ from ..schemas import (
     PasswordResetConfirm,
     PasswordResetRequest,
     RegisterRequest,
+    RegisterResponse,
     ResendVerificationRequest,
     TokenResponse,
     UserResponse,
@@ -113,8 +114,8 @@ async def _revoke_family(db: AsyncSession, family_id: uuid.UUID) -> None:
 # --------------------------------------------------------------------------- #
 # Registration  (US-001, US-002, US-003)
 # --------------------------------------------------------------------------- #
-@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=MessageResponse)
-async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> MessageResponse:
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=RegisterResponse)
+async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> RegisterResponse:
     if await _get_user_by_email(db, payload.email) is not None:
         # AC-002-01
         raise HTTPException(
@@ -122,28 +123,40 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
             detail="An account with this email already exists",
         )
 
+    # Dev fallback when no email provider is configured (see settings.auto_verify_email).
+    auto_verify = settings.auto_verify_email
+
     user = User(
         email=payload.email.strip().lower(),
         password_hash=hash_password(payload.password),
-        email_verified=False,
+        email_verified=auto_verify,
         roles=["learner"],
     )
     db.add(user)
     await db.flush()  # assign user.id
 
-    raw_token = generate_token()
-    db.add(
-        EmailVerificationToken(
-            user_id=user.id,
-            token_hash=hash_token(raw_token),
-            expires_at=utcnow() + timedelta(hours=settings.email_verification_ttl_hours),
+    raw_token: str | None = None
+    if not auto_verify:
+        raw_token = generate_token()
+        db.add(
+            EmailVerificationToken(
+                user_id=user.id,
+                token_hash=hash_token(raw_token),
+                expires_at=utcnow() + timedelta(hours=settings.email_verification_ttl_hours),
+            )
         )
-    )
     await db.commit()
 
-    emailer.send_verification_email(user.email, raw_token)  # AC-001-02
-    return MessageResponse(
-        message="Registration successful. Check your inbox to verify your email."
+    if raw_token is not None:
+        emailer.send_verification_email(user.email, raw_token)  # AC-001-02
+        return RegisterResponse(
+            message="Registration successful. Check your inbox to verify your email.",
+            email_verified=False,
+        )
+
+    return RegisterResponse(
+        message="Registration successful. You can log in now.",
+        email_verified=True,
     )
 
 
