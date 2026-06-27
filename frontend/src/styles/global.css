@@ -1,0 +1,53 @@
+/* ============================================================
+   LearnFlow — Global reset & base
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--text-body);
+  background: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Loading spinner used by Button */
+@keyframes lf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Auth split-screen collapses to a single column on small screens */
+@media (max-width: 860px) {
+  .lf-auth-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .lf-auth-brand {
+    display: none !important;
+  }
+}
+
+/* Calm, no bounce — honour reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

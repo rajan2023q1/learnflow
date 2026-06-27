@@ -1,0 +1,17 @@
+# Snyk (https://snyk.io) policy file
+version: v1.25.0
+
+# Snyk Code excludes for reviewed false positives in non-production code.
+#
+#   tests/**                  - Test fixtures use literal credentials by
+#                               design (e.g. a known-wrong password to assert
+#                               a 401, a fresh password to assert reset works).
+#                               These are not secrets and never run in prod.
+#   scripts/generate_keys.py  - Developer-only CLI that writes a JWT keypair
+#                               to an --out-dir the developer supplies. The
+#                               "path traversal" flow is the intended behavior
+#                               of a local tool with no untrusted input.
+exclude:
+  code:
+    - tests/**
+    - scripts/generate_keys.py

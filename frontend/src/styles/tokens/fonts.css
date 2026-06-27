@@ -1,0 +1,11 @@
+/* ============================================================
+   LearnFlow — Webfonts
+   Primary UI typeface: Inter (variable, Google Fonts)
+   Monospace: JetBrains Mono (tokens, code, IDs)
+
+   NOTE: Loaded from Google Fonts CDN. Consumers needing fully
+   offline/self-hosted binaries should download Inter + JetBrains
+   Mono and replace these @import lines with local @font-face.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');

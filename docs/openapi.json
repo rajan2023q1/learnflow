@@ -1,0 +1,692 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LearnFlow Auth",
+    "description": "LearnFlow Authentication & Identity Management API (UC-1).",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register a new learner account",
+        "description": "Create a learner account from an email and a confirmed, policy-compliant password (US-001, AC-001-01). The password must be at least 8 characters with an uppercase letter, a digit, and a special character (AC-001-03), and `confirm_password` must match. The email is stored normalised (trimmed, lower-cased) and the password is bcrypt-hashed (FR-10).\n\nUnless the server is in its dev auto-verify mode, the account is created with `email_verified = false` and a single-use verification link is emailed within 30 seconds (AC-001-02); the response's `email_verified` flag tells the client whether to show the \"check your inbox\" screen or route straight to login.",
+        "operationId": "register_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Account created. A verification email was queued unless auto-verify is enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An account already exists for this email (AC-002-01).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "detail": "An account with this email already exists"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed \u2014 malformed email, password fails the complexity policy, or the passwords do not match (AC-001-03).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verify Email",
+        "description": "Confirm an email from its verification token (US-003).\n\nMarks the account verified and consumes the single-use token (AC-003-01).\nAn unknown token is 400; a token past its 24-hour TTL is deleted and\nanswered with 410 so the client can prompt for a fresh link (AC-003-02).",
+        "operationId": "verify_email_auth_verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify-email/resend": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Resend Verification",
+        "description": "Re-send a verification link for an unverified account (US-003).\n\nRate-limited per client IP (429 when exceeded). Replaces any outstanding\ntoken and emails a new one only when the account exists and is unverified,\nbut always returns the same uniform message so the response can't reveal\nwhether the email is registered (FR-09).",
+        "operationId": "resend_verification_auth_verify_email_resend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Authenticate with email and password",
+        "description": "Verify credentials and, on success, return a short-lived RS256 access token (15-minute TTL) while setting the opaque refresh token as an HttpOnly/Secure/SameSite cookie via the `Set-Cookie` response header (AC-004-01, AC-007-01, NFR-05). Send `remember = false` to make the refresh cookie session-scoped (cleared on browser close).\n\nFailures return a single generic message so callers cannot tell whether the email exists (AC-004-02, FR-09). After repeated failures the account is temporarily locked and a warning email is sent (AC-004-04, FR-06).",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated. Returns the access token; the refresh token is set in an HttpOnly cookie via `Set-Cookie`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unknown email or wrong password \u2014 deliberately indistinguishable (AC-004-02).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "detail": "Invalid email or password"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Credentials are correct but the email is not yet verified (AC-004-03).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "detail": "Please verify your email before logging in"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Account temporarily locked after too many failed attempts (AC-004-04).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "detail": "Account temporarily locked. Try again in 15 minutes."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed \u2014 malformed email or missing fields.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh",
+        "description": "Rotate the refresh token and mint a new access token (US-008).\n\nReads the refresh cookie, then on a valid, unexpired, unrevoked token\nrevokes it and issues a replacement in the same family plus a new access\ntoken (AC-008-01). Presenting an already-rotated token signals theft: the\nwhole family is revoked and a security alert is emailed (AC-008-02). Missing,\nunknown, or expired tokens return 401 and clear the cookie.",
+        "operationId": "refresh_auth_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "description": "End the current session (US-006).\n\nRevokes the presented refresh token if it is still active and clears the\ncookie (AC-006-01). Idempotent: a missing or already-revoked token still\nreturns 200 so logout never fails for the client.",
+        "operationId": "logout_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/password-reset/request": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Password Reset Request",
+        "description": "Start a self-service password reset (US-009).\n\nRate-limited per client IP. When the email matches an account, stores a\nhashed, 1-hour UUID v4 reset token and emails the link; otherwise does\nnothing visible. Always returns 200 with the same message to prevent email\nenumeration (AC-009-01, FR-09).",
+        "operationId": "password_reset_request_auth_password_reset_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/password-reset/confirm": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Password Reset Confirm",
+        "description": "Complete a password reset with a valid token (US-010, US-011).\n\nOn a valid, unused, unexpired token, sets the new (policy-compliant)\npassword, consumes the token, and revokes every active refresh token for the\naccount so all sessions are forced to re-authenticate (AC-010-01/02, FR-08).\nAn invalid or already-used token is 400; an expired one is deleted and\nanswered with 410 (AC-011-01).",
+        "operationId": "password_reset_confirm_auth_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "description": "Return the authenticated user's profile (US-005).\n\nJWT-guarded via ``get_current_user``: a missing, expired, or tampered token\nyields 401 (AC-005-01, AC-007-02).",
+        "operationId": "me_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "description": "Shape of an error body. Mirrors FastAPI's default ``{\"detail\": ...}`` so\ndocumented error responses in the OpenAPI spec carry a real schema."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "remember": {
+            "type": "boolean",
+            "title": "Remember",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "MessageResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "MessageResponse"
+      },
+      "PasswordResetConfirm": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "confirm_password": {
+            "type": "string",
+            "title": "Confirm Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "password",
+          "confirm_password"
+        ],
+        "title": "PasswordResetConfirm"
+      },
+      "PasswordResetRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequest"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "confirm_password": {
+            "type": "string",
+            "title": "Confirm Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "confirm_password"
+        ],
+        "title": "RegisterRequest"
+      },
+      "RegisterResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "email_verified": {
+            "type": "boolean",
+            "title": "Email Verified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "email_verified"
+        ],
+        "title": "RegisterResponse"
+      },
+      "ResendVerificationRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "ResendVerificationRequest"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in"
+        ],
+        "title": "TokenResponse"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "email_verified": {
+            "type": "boolean",
+            "title": "Email Verified"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "email_verified",
+          "roles",
+          "created_at"
+        ],
+        "title": "UserResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerifyEmailRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "VerifyEmailRequest"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

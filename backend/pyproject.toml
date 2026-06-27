@@ -1,0 +1,16 @@
+[project]
+name = "learnflow-backend"
+version = "0.1.0"
+description = "LearnFlow Authentication & Identity Management API (UC-1)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+# SQLAlchemy's async engine runs code inside greenlets; without this, coverage
+# under-counts every handler line that follows an `await db.execute(...)`.
+concurrency = ["greenlet", "thread"]
+source = ["app"]
+omit = ["tests/*"]
