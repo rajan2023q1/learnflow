@@ -48,7 +48,7 @@ sync equivalent automatically (`migrations/env.py`).
 ## Tests
 
 ```bash
-pytest            # 22 tests, mapped to the UC-1 acceptance criteria
+pytest            # 43 tests, mapped to the UC-1 acceptance criteria
 ```
 
 ## Endpoints
@@ -64,6 +64,43 @@ pytest            # 22 tests, mapped to the UC-1 acceptance criteria
 | POST | `/auth/password-reset/request` | Always-200 reset request | AC-009 |
 | POST | `/auth/password-reset/confirm` | Set new password, revoke sessions (410 if expired) | AC-010, AC-011 |
 | GET | `/auth/me` | Current user (JWT-guarded) | AC-005, AC-007 |
+
+## UC-1 — Authentication & Identity Management
+
+UC-1 is the learner identity lifecycle: self-registration with email verification,
+credential login with short-lived RS256 access tokens and rotating refresh tokens,
+explicit logout, account lockout, and self-service password reset. The full
+business requirements (user stories, acceptance criteria, FRs/NFRs) live in
+[`../docs/UC-1-requirements.md`](../docs/UC-1-requirements.md); this backend
+implements all of them. The API surface is documented at runtime under `/docs`
+and `/redoc`, and a static copy of the spec is checked in at
+[`../docs/openapi.json`](../docs/openapi.json).
+
+### User-story coverage
+
+| Story | Summary | Status | Where |
+|-------|---------|--------|-------|
+| US-001 | New learner self-registration | ✅ | `POST /auth/register` |
+| US-002 | Duplicate-email prevention (409) | ✅ | `POST /auth/register` |
+| US-003 | Email verification + resend | ✅ | `POST /auth/verify-email`, `/auth/verify-email/resend` |
+| US-004 | Credential-based login | ✅ | `POST /auth/login` |
+| US-005 | Persistent session via JWT | ✅ (server) | `GET /auth/me`; silent refresh in `../frontend` |
+| US-006 | Secure logout | ✅ | `POST /auth/logout` |
+| US-007 | Access-token issuance (RS256) | ✅ | `app/jwt_service.py` |
+| US-008 | Refresh-token rotation + reuse detection | ✅ | `POST /auth/refresh` |
+| US-009 | Password-reset request (always 200) | ✅ | `POST /auth/password-reset/request` |
+| US-010 | Password-reset completion + session revocation | ✅ | `POST /auth/password-reset/confirm` |
+| US-011 | Expired-reset-link notification (410) | ✅ | `POST /auth/password-reset/confirm` |
+
+### Regenerating the OpenAPI spec
+
+`docs/openapi.json` is generated from the running app definition. Regenerate it
+after changing any route or schema:
+
+```bash
+cd backend
+python -m scripts.export_openapi          # writes ../docs/openapi.json
+```
 
 ## How the requirements map to code
 

@@ -80,6 +80,13 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class ErrorResponse(BaseModel):
+    """Shape of an error body. Mirrors FastAPI's default ``{"detail": ...}`` so
+    documented error responses in the OpenAPI spec carry a real schema."""
+
+    detail: str
+
+
 class RegisterResponse(BaseModel):
     message: str
     # True when the account was auto-verified (dev, no email provider) so the

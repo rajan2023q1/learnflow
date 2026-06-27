@@ -25,6 +25,7 @@ from ..models import (
     User,
 )
 from ..schemas import (
+    ErrorResponse,
     LoginRequest,
     MessageResponse,
     PasswordResetConfirm,
@@ -49,6 +50,8 @@ LOCKED_MESSAGE = "Account temporarily locked. Try again in 15 minutes."
 # Helpers
 # --------------------------------------------------------------------------- #
 async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
+    """Case-insensitive lookup of a user by email. Returns ``None`` when no
+    account matches, so callers can branch without leaking existence to clients."""
     normalized = email.strip().lower()
     return (
         await db.execute(select(User).where(func.lower(User.email) == normalized))
@@ -89,6 +92,9 @@ async def _enforce_throttle(db: AsyncSession, bucket: str) -> None:
 
 
 def _set_refresh_cookie(response: Response, raw_token: str, *, persistent: bool = True) -> None:
+    """Write the opaque refresh token to the HttpOnly/Secure/SameSite cookie
+    (NFR-05). With ``persistent=False`` it becomes a session cookie that the
+    browser drops on close ("remember me" unchecked)."""
     response.set_cookie(
         key=settings.refresh_cookie_name,
         value=raw_token,
@@ -104,6 +110,8 @@ def _set_refresh_cookie(response: Response, raw_token: str, *, persistent: bool 
 
 
 def _clear_refresh_cookie(response: Response) -> None:
+    """Remove the refresh cookie (logout, or on any path that invalidates the
+    presented token) using the same domain/path it was set with."""
     response.delete_cookie(
         key=settings.refresh_cookie_name,
         domain=settings.cookie_domain,
@@ -114,6 +122,9 @@ def _clear_refresh_cookie(response: Response) -> None:
 async def _issue_refresh_token(
     db: AsyncSession, user: User, family_id: uuid.UUID | None = None
 ) -> str:
+    """Persist a new refresh token (only its hash is stored) and return the raw
+    value for the cookie. Pass ``family_id`` to keep a rotated token in the same
+    lineage so reuse detection can revoke the whole family (AC-008-02)."""
     raw = generate_token()
     db.add(
         RefreshToken(
@@ -151,12 +162,57 @@ async def _revoke_family(db: AsyncSession, family_id: uuid.UUID) -> None:
 # --------------------------------------------------------------------------- #
 # Registration  (US-001, US-002, US-003)
 # --------------------------------------------------------------------------- #
-@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=RegisterResponse)
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    response_model=RegisterResponse,
+    summary="Register a new learner account",
+    description=(
+        "Create a learner account from an email and a confirmed, policy-compliant "
+        "password (US-001, AC-001-01). The password must be at least 8 characters "
+        "with an uppercase letter, a digit, and a special character (AC-001-03), and "
+        "`confirm_password` must match. The email is stored normalised (trimmed, "
+        "lower-cased) and the password is bcrypt-hashed (FR-10).\n\n"
+        "Unless the server is in its dev auto-verify mode, the account is created "
+        "with `email_verified = false` and a single-use verification link is emailed "
+        "within 30 seconds (AC-001-02); the response's `email_verified` flag tells the "
+        "client whether to show the \"check your inbox\" screen or route straight to login."
+    ),
+    responses={
+        status.HTTP_201_CREATED: {
+            "description": "Account created. A verification email was queued unless "
+            "auto-verify is enabled.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "An account already exists for this email (AC-002-01).",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "An account with this email already exists"}
+                }
+            },
+        },
+        422: {
+            "description": "Validation failed — malformed email, password fails the "
+            "complexity policy, or the passwords do not match (AC-001-03).",
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                }
+            },
+        },
+    },
+)
 async def register(
     payload: RegisterRequest,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> RegisterResponse:
+    """Self-service registration (US-001/US-002/US-003).
+
+    Rejects a duplicate email with 409 (AC-002-01), otherwise persists the user
+    and — when email verification is required — dispatches a single-use
+    verification link as a background task (AC-001-02)."""
     if await _get_user_by_email(db, payload.email) is not None:
         # AC-002-01
         raise HTTPException(
@@ -204,6 +260,11 @@ async def register(
 
 @router.post("/verify-email", response_model=MessageResponse)
 async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(get_db)) -> MessageResponse:
+    """Confirm an email from its verification token (US-003).
+
+    Marks the account verified and consumes the single-use token (AC-003-01).
+    An unknown token is 400; a token past its 24-hour TTL is deleted and
+    answered with 410 so the client can prompt for a fresh link (AC-003-02)."""
     record = (
         await db.execute(
             select(EmailVerificationToken).where(
@@ -241,6 +302,12 @@ async def resend_verification(
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
+    """Re-send a verification link for an unverified account (US-003).
+
+    Rate-limited per client IP (429 when exceeded). Replaces any outstanding
+    token and emails a new one only when the account exists and is unverified,
+    but always returns the same uniform message so the response can't reveal
+    whether the email is registered (FR-09)."""
     await _enforce_throttle(db, f"resend:ip:{_client_ip(request)}")
 
     user = await _get_user_by_email(db, payload.email)
@@ -286,21 +353,83 @@ async def _recent_failures(db: AsyncSession, email: str, ip: str | None = None) 
 
 
 async def _record_attempt(db: AsyncSession, email: str, ip: str, *, successful: bool) -> None:
+    """Append one row to the login-attempt ledger that drives the FR-06 lockout."""
     db.add(LoginAttempt(email=email.strip().lower(), ip_address=ip, successful=successful))
 
 
 async def _prune_login_attempts(db: AsyncSession) -> None:
+    """Delete login-attempt rows past the retention window so the ledger stays
+    bounded (opportunistic, runs on each login)."""
     cutoff = utcnow() - timedelta(hours=settings.login_attempt_retention_hours)
     await db.execute(delete(LoginAttempt).where(LoginAttempt.created_at < cutoff))
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Authenticate with email and password",
+    description=(
+        "Verify credentials and, on success, return a short-lived RS256 access "
+        "token (15-minute TTL) while setting the opaque refresh token as an "
+        "HttpOnly/Secure/SameSite cookie via the `Set-Cookie` response header "
+        "(AC-004-01, AC-007-01, NFR-05). Send `remember = false` to make the "
+        "refresh cookie session-scoped (cleared on browser close).\n\n"
+        "Failures return a single generic message so callers cannot tell whether "
+        "the email exists (AC-004-02, FR-09). After repeated failures the account "
+        "is temporarily locked and a warning email is sent (AC-004-04, FR-06)."
+    ),
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Authenticated. Returns the access token; the refresh "
+            "token is set in an HttpOnly cookie via `Set-Cookie`.",
+        },
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ErrorResponse,
+            "description": "Unknown email or wrong password — deliberately "
+            "indistinguishable (AC-004-02).",
+            "content": {
+                "application/json": {"example": {"detail": INVALID_CREDENTIALS}}
+            },
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "Credentials are correct but the email is not yet "
+            "verified (AC-004-03).",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Please verify your email before logging in"}
+                }
+            },
+        },
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "model": ErrorResponse,
+            "description": "Account temporarily locked after too many failed "
+            "attempts (AC-004-04).",
+            "content": {"application/json": {"example": {"detail": LOCKED_MESSAGE}}},
+        },
+        422: {
+            "description": "Validation failed — malformed email or missing fields.",
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                }
+            },
+        },
+    },
+)
 async def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
+    """Credential login (US-004, US-007).
+
+    Enforces the FR-06 lockout before checking credentials, returns a generic
+    401 on bad credentials (AC-004-02), 403 for a correct-but-unverified account
+    (AC-004-03), and 429 once the failure threshold is crossed (AC-004-04). On
+    success it clears the failure ledger and issues an access token plus a fresh
+    refresh-token family (AC-004-01)."""
     ip = _client_ip(request)
     await _prune_login_attempts(db)  # keep the ledger bounded (finding #11)
     user = await _get_user_by_email(db, payload.email)
@@ -356,6 +485,13 @@ async def login(
 async def refresh(
     request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
+    """Rotate the refresh token and mint a new access token (US-008).
+
+    Reads the refresh cookie, then on a valid, unexpired, unrevoked token
+    revokes it and issues a replacement in the same family plus a new access
+    token (AC-008-01). Presenting an already-rotated token signals theft: the
+    whole family is revoked and a security alert is emailed (AC-008-02). Missing,
+    unknown, or expired tokens return 401 and clear the cookie."""
     raw = request.cookies.get(settings.refresh_cookie_name)
     if not raw:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
@@ -409,6 +545,11 @@ async def refresh(
 async def logout(
     request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> MessageResponse:
+    """End the current session (US-006).
+
+    Revokes the presented refresh token if it is still active and clears the
+    cookie (AC-006-01). Idempotent: a missing or already-revoked token still
+    returns 200 so logout never fails for the client."""
     raw = request.cookies.get(settings.refresh_cookie_name)
     if raw:
         record = (
@@ -434,6 +575,12 @@ async def password_reset_request(
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
+    """Start a self-service password reset (US-009).
+
+    Rate-limited per client IP. When the email matches an account, stores a
+    hashed, 1-hour UUID v4 reset token and emails the link; otherwise does
+    nothing visible. Always returns 200 with the same message to prevent email
+    enumeration (AC-009-01, FR-09)."""
     await _enforce_throttle(db, f"reset:ip:{_client_ip(request)}")
 
     user = await _get_user_by_email(db, payload.email)
@@ -463,6 +610,13 @@ async def password_reset_request(
 async def password_reset_confirm(
     payload: PasswordResetConfirm, db: AsyncSession = Depends(get_db)
 ) -> MessageResponse:
+    """Complete a password reset with a valid token (US-010, US-011).
+
+    On a valid, unused, unexpired token, sets the new (policy-compliant)
+    password, consumes the token, and revokes every active refresh token for the
+    account so all sessions are forced to re-authenticate (AC-010-01/02, FR-08).
+    An invalid or already-used token is 400; an expired one is deleted and
+    answered with 410 (AC-011-01)."""
     record = (
         await db.execute(
             select(PasswordResetToken).where(
@@ -509,5 +663,9 @@ async def password_reset_confirm(
 async def me(
     current: UserContext = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> User:
+    """Return the authenticated user's profile (US-005).
+
+    JWT-guarded via ``get_current_user``: a missing, expired, or tampered token
+    yields 401 (AC-005-01, AC-007-02)."""
     user = (await db.execute(select(User).where(User.id == current.id))).scalar_one()
     return user
