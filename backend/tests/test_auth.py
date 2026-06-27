@@ -51,6 +51,21 @@ async def test_verify_email_invalid_token(client):
     assert resp.status_code == 400
 
 
+async def test_resend_verification_sends_new_link(client, outbox):
+    await register_user(client, email="resend@example.com")
+    outbox.clear()
+    resp = await client.post("/auth/verify-email/resend", json={"email": "resend@example.com"})
+    assert resp.status_code == 200
+    assert len(outbox) == 1 and outbox[0].token  # a fresh verification email went out
+
+
+async def test_resend_verification_unknown_email_is_uniform(client, outbox):
+    # No account → still 200 (no enumeration) and no email sent (FR-09).
+    resp = await client.post("/auth/verify-email/resend", json={"email": "ghost@example.com"})
+    assert resp.status_code == 200
+    assert outbox == []
+
+
 # --- Login (US-004) ---------------------------------------------------------
 async def test_login_success_sets_refresh_cookie(client, outbox):
     email, password = await register_and_verify(client, outbox)
